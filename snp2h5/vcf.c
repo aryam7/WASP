@@ -50,7 +50,9 @@ void vcf_info_free(VCFInfo *vcf_info) {
     for(i = 0; i < vcf_info->n_sample; i++) {
       my_free(vcf_info->sample_names[i]);
     }
-    my_free(vcf_info->sample_names);
+    if(vcf_info->sample_names) {
+      my_free(vcf_info->sample_names);
+    }
   }
 
   
@@ -80,7 +82,11 @@ char *vcf_get_chrom_name(const char *filename) {
 
   /* read header */
   vcf_read_header(gzf, vcf_info);
-
+  
+  if(vcf_info->n_sample == 0) {
+    return NULL;
+  }
+  
   /* read first line */
   ret = vcf_read_line(gzf, vcf_info, &snp, NULL, NULL, NULL);
 
@@ -175,7 +181,15 @@ void vcf_read_header(gzFile vcf_fh, VCFInfo *vcf_info) {
       }
       my_free(line);
       break;
-    } 
+    } else {
+      /* VCF did not appear to contain any header lines starting with '#' */
+      my_warn("VCF file did not contain any header lines. "
+	      "Expected final header line to start with '#CHROM' "
+	      "and to contain sample names.\n");
+      vcf_info->n_sample = 0;
+      vcf_info->has_format = FALSE;
+      break;
+    }
   }
 }
 
@@ -477,9 +491,14 @@ void vcf_parse_geno_probs(VCFInfo *vcf_info, float *geno_probs, char *cur) {
   /* get index of GP and GL tokens in format string */
   gp_idx = get_format_index(vcf_info->format, "GP");
   gl_idx = get_format_index(vcf_info->format, "GL");
-  
+
+  if(gl_idx == -1) {
+    /* PL is same as GL, but rounded to nearest integer */
+    gl_idx = get_format_index(vcf_info->format, "PL");
+  }
+
   if((gl_idx == -1) && (gp_idx == -1)) {
-    my_err("%s:%d: VCF format string does not specify GL or GP token "
+    my_err("%s:%d: VCF format string does not specify GL, GP, or PL token "
 	   "so cannot obtain genotype probabilities. Format string: '%s'.\n"
 	   "To use this file, you must run snp2h5 without "
 	   "the --geno_prob option.", __FILE__, __LINE__,
